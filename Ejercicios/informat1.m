@@ -1,0 +1,23 @@
+function [out] = informat1(theta,x)
+
+% Information matrix of an MA(1).
+s2=1;
+T=length(x);
+res=zeros(T,1);
+
+% First observation.
+dui=0;
+ui=x(1,1);
+
+% For the rest of the observations.
+for t=2:T
+   % Compute score for the iteration.
+   res(t,1) = (x(t,1) - theta*ui)*(ui + theta*dui)/s2;
+   % Compute the derivative of u with respect to theta.
+   dui =  -ui - theta*dui;
+   % Compute ui.
+   ui = x(t,1) - theta*ui;
+end
+
+% Output.
+out = var(res);

@@ -1,0 +1,520 @@
+% These codes are for the specification tests.
+
+clear all; %control c para el codigo corriendo-----clear borra en memoria
+close all;
+clc;
+
+tic; % tiempo
+
+%% Set the seed.
+rng(0)
+
+%% Set the parameters.
+BIP=500;                %burn in period
+T=1000+BIP;             % time series length.
+S=1000;                 % number of MC simulations.
+
+% Some of the parameters.
+rho=0;
+beta=0.5;
+alpha=0.3;
+sv=1;
+sw=1;
+
+% Store all results.
+lr=zeros(1,S);          % LR test statistic.
+wald=zeros(1,S);        % Wald test statistic.
+lm=zeros(1,S);          % LM test statistic.
+
+%% Simulation of the model.
+u = zeros(T,S);
+ymat = zeros(T,S);
+xmat = zeros(T,S);
+
+mu0=0.0;
+
+u0 = normrnd(mu0,(1-rho^2)^(-1)*sw);    % Initial value for u.
+v = normrnd(mu0,sv,[T,S]);
+w = normrnd(mu0,sw,[T,S]);
+u(1,1) = u0;
+
+for s=1:S
+    %% Generate u and y.
+    for t=2:T
+       u(t,s) = rho*u(t-1,s) + w(t,s);
+       ymat(t,s) =  alpha*beta*ymat(t-1,s) + beta*v(t,s) + u(t,s);
+    end
+end
+
+% Generate x.
+xmat(2:T,:) = alpha*ymat(1:T-1,:) + v(2:T,:);
+
+% I only want to take the ones from BIP+1 to T.
+ymat=ymat(BIP+1:T,:);
+xmat=xmat(BIP+1:T,:);
+
+%% Estimation of the model.
+
+% Get the length of the time series to be the new time series length.
+Tmat=length(xmat);
+npar=5;
+th0=zeros(npar,S); th1=zeros(npar,S); M1=zeros(1,S); M0=zeros(1,S);
+
+for s=1:S
+    disp(s) %pagina 15, son esas ecuaciones
+    % Estimates under the null hypothesis H0.
+    beta0  = (ymat(2:Tmat,s)'*xmat(2:Tmat,s))/(xmat(2:Tmat,s)'*xmat(2:Tmat,s));
+    alpha0 = (xmat(2:Tmat,s)'*ymat(1:Tmat-1,s))/(ymat(1:Tmat-1,s)'*ymat(1:Tmat-1,s));
+    sw20 =  (ymat(2:Tmat,s)- beta0*xmat(2:Tmat,s))'*(ymat(2:Tmat,s)- beta0*xmat(2:Tmat,s))/(Tmat-1);
+    sv20 =  (xmat(2:Tmat,s)- alpha0*ymat(1:Tmat-1,s))'*(xmat(2:Tmat,s)- alpha0*ymat(1:Tmat-1,s))/(Tmat-1);
+    th0(:,s) =  [beta0 alpha0 sw20 sv20 0];
+    
+    % Estimates under the alternative hypothesis H1.
+    [th1(:,s),~] = concllik(ymat(:,s),xmat(:,s));
+    
+    % Tests.
+    
+    % LR.
+    M0(:,s) = loglikeunrestricted(0,ymat(:,s),xmat(:,s));
+    M1(:,s) = loglikeunrestricted(th1(5,s),ymat(:,s),xmat(:,s));
+    lr(:,s) = 2*(M1(:,s)-M0(:,s));
+    
+    % LM.
+    scr0 =  scr1(0,ymat(:,s),xmat(:,s));
+    info0 = informat1(0,ymat(:,s),xmat(:,s));
+    lm(:,s) =  (scr0'*inv(info0)*scr0)/Tmat;
+
+    % Wald.
+    info1=informat1(th1(5,s),ymat(:,s),xmat(:,s));
+    stderr2 = diag(info1^(-1))/Tmat;
+    wald(:,s) = (th1(5,s)/sqrt(stderr2(5)))^2;
+    
+end
+
+%% Print the means.
+
+meanlr = mean(lr);
+meanlm = mean(lm);
+meanwald =  mean(wald);
+
+meanlr
+meanlm
+meanwald
+
+%% Now, compute the proportions of times that the 90 percent quantile is exceeded.
+crit =  chi2inv(0.9,1);
+
+lr90 = mean(lr>crit); % computa el porc de rechazo mean(trues/tot)
+lm90 = mean(lm>crit);
+wald90 = mean(wald>crit);
+
+lr90
+lm90
+wald90
+
+%% Calculate p-value discrepancies. pag 23
+
+epv = linspace(0,0.999,100);
+res = zeros(3,length(epv));
+%ver para distintos umbrales que tanto rechaza el test
+for i=1:length(epv)
+   chi =  chi2inv(epv(i),1);
+   ulr = (lr > chi);
+   ulm = (lm > chi);
+   uwald = (wald > chi);
+   res(1,i) = mean(ulr);
+   res(2,i) = mean(ulm);
+   res(3,i) = mean(uwald);  
+end
+
+%% Plot.
+
+%see that emprirical p values are in line with 45 degrees line, thats what
+%we want for te tests
+
+figure(1)
+plot(1-epv,1-epv,'LineStyle','-.','LineWidth',2,'Color',[0 0 0])
+hold on
+plot(1-epv,res(1,:),'LineStyle','--','LineWidth',2,'Color',[0.8 0.2 0.2])
+hold on
+plot(1-epv,res(2,:),'LineStyle','--','LineWidth',2,'Color',[0.2 0.2 0.6])
+hold on
+plot(1-epv,res(3,:),'LineStyle','--','LineWidth',2,'Color',[0 0.5 0])
+hold off
+xlabel('Nominal p-value')
+ylabel('Empirical p-value')
+title('Size plots')
+legend('45 degree line','LR','LM','Wald','Location','Southeast')
+
+%major discrepancies between empirical p values and thoeretical ones is in
+%the range between 0.1 and 0.4
+figure(2)
+plot(1-epv,zeros(length(epv),1),'LineStyle','-.','LineWidth',2,'Color',[0 0 0])
+hold on
+plot(1-epv,res(1,:)-(1-epv),'LineStyle','--','LineWidth',2,'Color',[0.8 0.2 0.2])
+hold on
+plot(1-epv,res(2,:)-(1-epv),'LineStyle','--','LineWidth',2,'Color',[0.2 0.2 0.6])
+hold on
+plot(1-epv,res(3,:)-(1-epv),'LineStyle','--','LineWidth',2,'Color',[0 0.5 0])
+hold off
+xlabel('Nominal p-value')
+ylabel('p-value discrepancy')
+title('Discrepancy plots')
+legend('45 degree line','LR','LM','Wald','Location','Southeast')
+
+%% Kernel density of the rho's.
+%seems like rhos are normally distributed with mean 0
+nbins=20;
+figure(3)
+histfit(th1(5,:),nbins)
+xlabel('\rho')
+ylabel('density')
+
+toc;
+
+
+clear all; %control c para el codigo corriendo-----clear borra en memoria
+close all;
+clc;
+
+tic; % tiempo
+
+%% Set the seed.
+rng(0)
+
+%% Set the parameters.
+BIP=500;                % burn in period.
+T=1000+BIP;                 % time series length.
+S=1000;                 % number of MC simulations.
+
+% Some of the parameters.
+rho=0.025;
+beta=0.5;
+alpha=0.3;
+sv=1;
+sw=1;
+
+% Store all results.
+lr=zeros(1,S);          % LR test statistic.
+wald=zeros(1,S);        % Wald test statistic.
+lm=zeros(1,S);          % LM test statistic.
+
+%% Simulation of the model.
+u = zeros(T,S);
+ymat = zeros(T,S);
+xmat = zeros(T,S);
+
+mu0=0.0;
+
+u0 = normrnd(mu0,(1-rho^2)^(-1)*sw);    % Initial value for u.
+v = normrnd(mu0,sv,[T,S]);
+w = normrnd(mu0,sw,[T,S]);
+u(1,1) = u0;
+
+for s=1:S
+    %% Generate u and y.
+    for t=2:T
+       u(t,s) = rho*u(t-1,s) + w(t,s);
+       ymat(t,s) =  alpha*beta*ymat(t-1,s) + beta*v(t,s) + u(t,s);
+    end
+end
+
+% Generate x.
+xmat(2:T,:) = alpha*ymat(1:T-1,:) + v(2:T,:);
+
+% I only want to take the ones from BIP+1 to T.
+ymat=ymat(BIP+1:T,:);
+xmat=xmat(BIP+1:T,:);
+
+%% Estimation of the model.
+
+% Get the length of the time series to be the new time series length.
+Tmat=length(xmat);
+npar=5;
+th0=zeros(npar,S); th1=zeros(npar,S); M1=zeros(1,S); M0=zeros(1,S);
+
+for s=1:S
+    disp(s) %pagina 15, son esas ecuaciones
+    % Estimates under the null hypothesis H0.
+    beta0  = (ymat(2:Tmat,s)'*xmat(2:Tmat,s))/(xmat(2:Tmat,s)'*xmat(2:Tmat,s));
+    alpha0 = (xmat(2:Tmat,s)'*ymat(1:Tmat-1,s))/(ymat(1:Tmat-1,s)'*ymat(1:Tmat-1,s));
+    sw20 =  (ymat(2:Tmat,s)- beta0*xmat(2:Tmat,s))'*(ymat(2:Tmat,s)- beta0*xmat(2:Tmat,s))/(Tmat-1);
+    sv20 =  (xmat(2:Tmat,s)- alpha0*ymat(1:Tmat-1,s))'*(xmat(2:Tmat,s)- alpha0*ymat(1:Tmat-1,s))/(Tmat-1);
+    th0(:,s) =  [beta0 alpha0 sw20 sv20 0];
+    
+    % Estimates under the alternative hypothesis H1.
+    [th1(:,s),~] = concllik(ymat(:,s),xmat(:,s));
+    
+    % Tests.
+    
+    % LR.
+    M0(:,s) = loglikeunrestricted(0,ymat(:,s),xmat(:,s));
+    M1(:,s) = loglikeunrestricted(th1(5,s),ymat(:,s),xmat(:,s));
+    lr(:,s) = 2*(M1(:,s)-M0(:,s));
+    
+    % LM.
+    scr0 =  scr1(0,ymat(:,s),xmat(:,s));
+    info0 = informat1(0,ymat(:,s),xmat(:,s));
+    lm(:,s) =  (scr0'*inv(info0)*scr0)/Tmat;
+
+    % Wald.
+    info1=informat1(th1(5,s),ymat(:,s),xmat(:,s));
+    stderr2 = diag(info1^(-1))/Tmat;
+    wald(:,s) = (th1(5,s)/sqrt(stderr2(5)))^2;
+    
+end
+
+%% Print the means.
+
+% this time, as expected, mean is greater than with rho=0, 
+meanlr = mean(lr);
+meanlm = mean(lm);
+meanwald =  mean(wald);
+
+meanlr
+meanlm
+meanwald
+
+%% Now, compute the proportions of times that the 90 percent quantile is exceeded.
+crit =  chi2inv(0.9,1);
+
+lr90 = mean(lr>crit); % computa el porc de rechazo mean(trues/tot)
+lm90 = mean(lm>crit);
+wald90 = mean(wald>crit);
+
+%90 percent quantile is exceedeed more frequently,  
+lr90 %0,174
+lm90 %0.1750
+wald90 %0.1710
+
+%% Calculate p-value discrepancies. pag 23
+
+epv = linspace(0,0.999,100);
+res = zeros(3,length(epv));
+%ver para distintos umbrales que tanto rechaza el test
+for i=1:length(epv)
+   chi =  chi2inv(epv(i),1);
+   ulr = (lr > chi);
+   ulm = (lm > chi);
+   uwald = (wald > chi);
+   res(1,i) = mean(ulr);
+   res(2,i) = mean(ulm);
+   res(3,i) = mean(uwald);  
+end
+
+%% Plot.
+
+%with rho=0.025, relatively with rho=0, we see a greater discrepancy between empirical and nominal p values 
+%p-values are inflated (greater thanthe real nominal p value).
+
+figure(1)
+plot(1-epv,1-epv,'LineStyle','-.','LineWidth',2,'Color',[0 0 0])
+hold on
+plot(1-epv,res(1,:),'LineStyle','--','LineWidth',2,'Color',[0.8 0.2 0.2])
+hold on
+plot(1-epv,res(2,:),'LineStyle','--','LineWidth',2,'Color',[0.2 0.2 0.6])
+hold on
+plot(1-epv,res(3,:),'LineStyle','--','LineWidth',2,'Color',[0 0.5 0])
+hold off
+xlabel('Nominal p-value')
+ylabel('Empirical p-value')
+title('Size plots')
+legend('45 degree line','LR','LM','Wald','Location','Southeast')
+
+%now, the discrepancy is greater betweem 0.1 and 0.4 p values, with a peak
+%around 0.4
+
+figure(2)
+plot(1-epv,zeros(length(epv),1),'LineStyle','-.','LineWidth',2,'Color',[0 0 0])
+hold on
+plot(1-epv,res(1,:)-(1-epv),'LineStyle','--','LineWidth',2,'Color',[0.8 0.2 0.2])
+hold on
+plot(1-epv,res(2,:)-(1-epv),'LineStyle','--','LineWidth',2,'Color',[0.2 0.2 0.6])
+hold on
+plot(1-epv,res(3,:)-(1-epv),'LineStyle','--','LineWidth',2,'Color',[0 0.5 0])
+hold off
+xlabel('Nominal p-value')
+ylabel('p-value discrepancy')
+title('Discrepancy plots')
+legend('45 degree line','LR','LM','Wald','Location','Southeast')
+
+%% Kernel density of the rho's.
+%estimated rhos are normally distributed around 0.025, our true rho
+nbins=20;
+figure(3)
+histfit(th1(5,:),nbins)
+xlabel('\rho')
+ylabel('density')
+
+
+clear all; %control c para el codigo corriendo-----clear borra en memoria
+close all;
+clc;
+
+tic; % tiempo
+
+%% Set the seed.
+rng(0)
+
+%% Set the parameters.
+BIP=500;                % burn in period.
+T=1000+BIP;                 % time series length.
+S=1000;                 % number of MC simulations.
+
+% Some of the parameters.
+rho=0.2;
+beta=0.5;
+alpha=0.3;
+sv=1;
+sw=1;
+
+% Store all results.
+lr=zeros(1,S);          % LR test statistic.
+wald=zeros(1,S);        % Wald test statistic.
+lm=zeros(1,S);          % LM test statistic.
+
+%% Simulation of the model.
+u = zeros(T,S);
+ymat = zeros(T,S);
+xmat = zeros(T,S);
+
+mu0=0.0;
+
+u0 = normrnd(mu0,(1-rho^2)^(-1)*sw);    % Initial value for u.
+v = normrnd(mu0,sv,[T,S]);
+w = normrnd(mu0,sw,[T,S]);
+u(1,1) = u0;
+
+for s=1:S
+    %% Generate u and y.
+    for t=2:T
+       u(t,s) = rho*u(t-1,s) + w(t,s);
+       ymat(t,s) =  alpha*beta*ymat(t-1,s) + beta*v(t,s) + u(t,s);
+    end
+end
+
+% Generate x.
+xmat(2:T,:) = alpha*ymat(1:T-1,:) + v(2:T,:);
+
+% I only want to take the ones from BIP+1 to T.
+ymat=ymat(BIP+1:T,:);
+xmat=xmat(BIP+1:T,:);
+
+%% Estimation of the model.
+
+% Get the length of the time series to be the new time series length.
+Tmat=length(xmat);
+npar=5;
+th0=zeros(npar,S); th1=zeros(npar,S); M1=zeros(1,S); M0=zeros(1,S);
+
+for s=1:S
+    disp(s) %pagina 15, son esas ecuaciones
+    % Estimates under the null hypothesis H0.
+    beta0  = (ymat(2:Tmat,s)'*xmat(2:Tmat,s))/(xmat(2:Tmat,s)'*xmat(2:Tmat,s));
+    alpha0 = (xmat(2:Tmat,s)'*ymat(1:Tmat-1,s))/(ymat(1:Tmat-1,s)'*ymat(1:Tmat-1,s));
+    sw20 =  (ymat(2:Tmat,s)- beta0*xmat(2:Tmat,s))'*(ymat(2:Tmat,s)- beta0*xmat(2:Tmat,s))/(Tmat-1);
+    sv20 =  (xmat(2:Tmat,s)- alpha0*ymat(1:Tmat-1,s))'*(xmat(2:Tmat,s)- alpha0*ymat(1:Tmat-1,s))/(Tmat-1);
+    th0(:,s) =  [beta0 alpha0 sw20 sv20 0];
+    
+    % Estimates under the alternative hypothesis H1.
+    [th1(:,s),~] = concllik(ymat(:,s),xmat(:,s));
+    
+    % Tests.
+    
+    % LR.
+    M0(:,s) = loglikeunrestricted(0,ymat(:,s),xmat(:,s));
+    M1(:,s) = loglikeunrestricted(th1(5,s),ymat(:,s),xmat(:,s));
+    lr(:,s) = 2*(M1(:,s)-M0(:,s));
+    
+    % LM.
+    scr0 =  scr1(0,ymat(:,s),xmat(:,s));
+    info0 = informat1(0,ymat(:,s),xmat(:,s));
+    lm(:,s) =  (scr0'*inv(info0)*scr0)/Tmat;
+
+    % Wald.
+    info1=informat1(th1(5,s),ymat(:,s),xmat(:,s));
+    stderr2 = diag(info1^(-1))/Tmat;
+    wald(:,s) = (th1(5,s)/sqrt(stderr2(5)))^2;
+    
+end
+
+%% Print the means.
+
+%now, our test means are far greater than with rho=0 and rho=0.025
+meanlr = mean(lr);
+meanlm = mean(lm);
+meanwald =  mean(wald);
+
+meanlr %37.13
+meanlm %36.95
+meanwald %37.76
+
+%% Now, compute the proportions of times that the 90 percent quantile is exceeded.
+crit =  chi2inv(0.9,1);
+
+%90 percentile is exceeded most of the time, because our test values are
+%big
+
+lr90 = mean(lr>crit); % computa el porc de rechazo mean(trues/tot)
+lm90 = mean(lm>crit);
+wald90 = mean(wald>crit);
+
+lr90 % 1
+lm90 % 1
+wald90 % 1
+
+%% Calculate p-value discrepancies. pag 23
+
+epv = linspace(0,0.999,100);
+res = zeros(3,length(epv));
+%ver para distintos umbrales que tanto rechaza el test
+for i=1:length(epv)
+   chi =  chi2inv(epv(i),1);
+   ulr = (lr > chi);
+   ulm = (lm > chi);
+   uwald = (wald > chi);
+   res(1,i) = mean(ulr);
+   res(2,i) = mean(ulm);
+   res(3,i) = mean(uwald);  
+end
+
+%% Plot.
+
+%there is a big discrepancy between empirical p-values and nominal ones
+figure(1)
+plot(1-epv,1-epv,'LineStyle','-.','LineWidth',2,'Color',[0 0 0])
+hold on
+plot(1-epv,res(1,:),'LineStyle','--','LineWidth',2,'Color',[0.8 0.2 0.2])
+hold on
+plot(1-epv,res(2,:),'LineStyle','--','LineWidth',2,'Color',[0.2 0.2 0.6])
+hold on
+plot(1-epv,res(3,:),'LineStyle','--','LineWidth',2,'Color',[0 0.5 0])
+hold off
+xlabel('Nominal p-value')
+ylabel('Empirical p-value')
+title('Size plots')
+legend('45 degree line','LR','LM','Wald','Location','Southeast')
+
+%greater discrepancy is at p value 0, 
+figure(2)
+plot(1-epv,zeros(length(epv),1),'LineStyle','-.','LineWidth',2,'Color',[0 0 0])
+hold on
+plot(1-epv,res(1,:)-(1-epv),'LineStyle','--','LineWidth',2,'Color',[0.8 0.2 0.2])
+hold on
+plot(1-epv,res(2,:)-(1-epv),'LineStyle','--','LineWidth',2,'Color',[0.2 0.2 0.6])
+hold on
+plot(1-epv,res(3,:)-(1-epv),'LineStyle','--','LineWidth',2,'Color',[0 0.5 0])
+hold off
+xlabel('Nominal p-value')
+ylabel('p-value discrepancy')
+title('Discrepancy plots')
+legend('45 degree line','LR','LM','Wald','Location','Southeast')
+
+%% Kernel density of the rho's.
+nbins=20;
+figure(3)
+histfit(th1(5,:),nbins)
+xlabel('\rho')
+ylabel('density')
+
+
