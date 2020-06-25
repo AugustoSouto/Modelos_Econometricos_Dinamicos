@@ -1,0 +1,454 @@
+---
+title: "Ejercicio 2"
+author: "Federico Molina y Augusto Souto"
+date: "24 de Junio de 2019"
+output:
+  pdf_document:
+    toc: yes
+    fig_caption: yes
+  html_document:
+    df_print: paged
+    toc: yes
+  word_document:
+    toc: yes
+keep_tex: yes
+lang: es
+geometry: margin=2cm
+fontsize: 10pt
+urlcolor: blue
+numbersections: yes 
+header-includes: 
+  - \usepackage{amsmath}
+  - \usepackage{pgfplots}
+  - \usepackage{pgf}
+  - \usepackage{float}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  results="hide",
+	message = FALSE,
+	warning = FALSE,
+	error=FALSE,
+	fig.pos="H",
+	options(xtable.comment = FALSE)
+)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+#Pruebas Dickey Fuller y KPSS
+
+```{r, message=FALSE, echo=FALSE, warning=FALSE}
+libs=c("tidyverse", "ggplot2", "ggfortify", "readxl","gridExtra", "vars", "readxl",
+       "seasonal", "lmtest", "tsoutliers", "urca", "plotly")
+
+# instalar librerias
+lib_nuevas <- libs[!(libs %in% installed.packages()[,"Package"])] 
+if(length(lib_nuevas)) install.packages(lib_nuevas)
+
+# cargar librerias
+load_libs <- function(libraries = libs) for (lib in libraries)
+  require(lib, character.only=T)
+load_libs(libs)
+theme_set(theme_bw())
+options(tibble.print_max = 50, tibble.print_min = 50, tibble.width = Inf, max.print = 50)
+tso1 <- function(data, serie, cval1, cval2) {
+  return(tsoutliers::tso(data[,serie], tsmethod = "auto.arima", 
+                         args.tsmethod = list(ic = "aicc", seasonal = FALSE, approximation = FALSE,
+                                              stepwise = FALSE), types = c("AO"), cval = cval1, 
+                         discard.method = "en-masse", maxit.iloop = 200, maxit.oloop = 200, check.rank = TRUE,
+                         discard.cval = cval2))
+}
+
+
+```
+
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+data <- readxl::read_excel(here::here("input","cuadro_133t.xls"), range = "B10:CM22")
+data <- data[complete.cases(data),]
+data <- dplyr::rename(.data = data, "sectores" = "...1")
+data <- tidyr::gather(data, key = fecha, value = VAB, -sectores) # en vez de -sectores se puede poner 2:ncol(data)
+data <- tidyr::spread(data, key = sectores, value = VAB)
+data$fecha <- stringr::str_replace_all(data$fecha, pattern = c("\\*"="", "IV" = "4" ,"III"="3", "II" = "2", "I"="1"))
+data$fecha <- lubridate::dmy(paste(1, data$fecha))
+data <- data[order(data$fecha),]
+
+colnames(data) # Nos quedamos con [3],[4],[7],  # Falta una serie!!
+serie <- ts(data[c(3,4,7, 10)], start = c(1997,1), frequency = 4)
+colnames(serie) <- c("agro", "industria", "comercio", "servicios")
+serie
+
+
+```
+Comenzamos con las cuatro series indicadas para la resolución del ejercicio, en términos constantes y desestacionalizadas. A continuación se presenta el aspecto de la base de datos sobre la que se llevará adelante el ejercicio:
+
+```{r, results="markup"}
+head(serie)
+```
+Estas series se pasan a logaritmos, se grafican y resumen en las siguientes lineas de código:
+
+```{r, echo=TRUE, results="markup"}
+serie <- log(serie)
+serie_diff1 <- diff(serie, 1)
+serie18 <- window(serie, start = c(1997,1), end = c(2018,2))
+serie18_diff1 <- diff(serie18, 1)
+test <- window(serie_diff1, start = c(2018,3), end = c(2018,4))
+
+(serie %>% autoplot(xlab = "años", show.legend = FALSE, ylab = "log")) 
+sapply(serie, summary)
+
+```
+Como se observa, las series presentan al menos 3 períodos claros: uno de estancamiento o decrecimiento desde el inicio de la serie hasta el año 2005, un segundo período con crecimiento sostenido desde 2005 hasta 2015, y un período con relativo estancamiento a partir de 2015.
+
+*PONER ALGO DE LOS SUMMARY STATISTCS*
+
+```{r,echo=FALSE, results="hide", warning=FALSE, message=FALSE, include=FALSE}
+sapply(serie, function(x){plot(decompose(x))})
+sapply(serie, function(x){stl(x, s.window = "periodic") %>% plot(.)}) # descomposición con stl
+
+# Esto, porque descargue la serie sin desestacionalizar. A elegir si la desestacionalizamos o descargarla
+# desestacionalizada...En dicho caso usamos el archivo cuadro_133t y esta parte nos la salteamos.
+
+for(j in c(FALSE,TRUE)) {
+  for(i in colnames(serie)) {
+    (forecast::ggseasonplot(serie[, i], continuous = TRUE, polar = j, 
+                            year.labels = TRUE, year.labels.left = TRUE, labelgap = 0.1) + 
+       ggtitle(i)) %>% plot()
+    # Sys.sleep(20) #20 segundos de pausa para analizar cada uno. Si se quiere, correr por separado...
+    readline(prompt = "Continuar? Apretar enter")
+  }
+}
+for(i in colnames(serie)) {
+  (forecast::ggsubseriesplot(serie[,i]) + ggtitle(i)) %>% plot()
+  readline(prompt = "Continuar? Apretar enter")
+}  # Se nota que están desestacionalizadas pero sigue habiendo mínimas diferencias.
+# O linea por linea en vez del for...
+boxplot(serie[,1]~cycle(serie[,1]))
+boxplot(serie[,2]~cycle(serie[,2]))
+boxplot(serie[,3]~cycle(serie[,3]))
+boxplot(serie[,4]~cycle(serie[,4]))
+
+
+```
+También apreciamos la serie en primera diferencia con respecto al trimestre anterior así como los gráficos de las funciones de autocorrelación y autocorrelación parcial para las series en niveles y en diferencia. 
+
+
+```{r, results="markup"}
+(serie_diff1 %>% autoplot(xlab = "Años", show.legend = FALSE, ylab = "Tasa de crecimiento"))
+
+acf(serie)
+pacf(serie)
+acf(serie_diff1)
+pacf(serie_diff1)
+
+```
+
+Como se ve en las gráficas de autocorrelación parcial, la mayoría de las correlaciones significativas son de las variables con ellas mismas en el trimestre inmediato anterior.
+
+Por último, implementamos el test de Dickey y Fuller en las cuatro series bajo dos configuracions diferentes: una con drift (o deriva) y otra sin drift.
+
+```{r, results="markup", echo=TRUE}
+for(j in colnames(serie)){
+  for(especificacion in c("drift", "none")) {
+    df <- urca::ur.df(serie[,j], type = especificacion, selectlags = "AIC")
+    print(c(toupper(j), especificacion))
+    print(df@teststat)
+    print(df@cval)
+    print("-----------------------")
+    readline(prompt = "Continuar? Apretar enter")
+    # serie[,j] %>% urca::ur.df(type = especificacion, selectlags = "AIC") %>% urca::summary() %>% print()
+  }
+}
+
+```
+
+Como se observa, primero se realizan las hipótesis compuestas que establecen $\tau_{2} =0$ y $\phi_{1}=0$ y en una segunda prueba se testea solo si $\tau_{1} =0$. 
+
+Para el caso del agro, en el primer paso no rechazamos $\tau_{2} =0$ y $\phi_{1}=0$, lo que nos indica que no se rechaza la hipótesis de una raíz unitaria sin drift. En el segundo paso, testeamos solamente $\tau_{2} =0$, es decir, si hay o no raíz unitaria. Los resultados del test no rechazan la hipótesis nula. Por lo tanto, se establece que la serie del Producto agrícola desestacionalizado seria integrada de orden uno sin drift.
+
+Para el caso de la industria aplicamos el mismo procedimiento que se aplico para el caso del agro. Los resultados son idénticos, es decir, al no rechazar las hipótesis nulas de los dos pasos, concluimos que la serie es integrada de orden 1 sin drift.
+
+En las restantes dos series, comercio y servicios, ocurre lo mismo que en las dos anteriores. Por lo tanto, todas las series son integradas de orden 1 sin drift.
+
+Estos resultados pueden ser corroborados mediante el uso del comando "ndiffs" del paquete forecast. Este comando, al que le especificamos el test a aplicar así como el tipo de componente determinístico, nos devuelve la cantidad de diferencias necesarias para transformar a la serie en una serie estacionaria.
+
+```{r}
+forecast::ndiffs(serie[, "agro"], type = "level", test = "adf")
+forecast::ndiffs(serie[, "industria"], type = "level", test = "adf")
+forecast::ndiffs(serie[, "comercio"], type = "level", test = "adf")
+forecast::ndiffs(serie[, "servicios"], type = "level", test = "adf")
+
+```
+Como se observa, todas las series requieren de una diferencia.
+
+Mediante este mismo comando también es posible aplicar la prueba KPSS:
+```{r, results="markup", echo=TRUE}
+for(j in colnames(serie)){
+  for(especificacion in c("mu", "tau")) {
+    print(toupper(j))
+    serie[,j] %>% urca::ur.kpss(type = especificacion, lags = "short") %>% urca::summary() %>% print()
+    print("-----------------------")
+    readline(prompt = "Continuar? Apretar enter")
+  }
+}
+# Análisis KPSS
+forecast::ndiffs(serie[, "agro"], type = "level", test = "kpss")
+forecast::ndiffs(serie[, "industria"], type = "level", test = "kpss")
+forecast::ndiffs(serie[, "comercio"], type = "level", test = "kpss")
+forecast::ndiffs(serie[, "servicios"], type = "level", test = "kpss")
+# En todos los casos no se rechaza una diferencia regular. Resultados idénticos. OK
+
+
+```
+
+Como vemos, la prueba KPSS arroja resultados consistentes con los observados en la prueba de Dickey Fuller. Por lo tanto, la serie necesitaria diferenciarse una vez.
+
+#Estimación del VAR Hasta 2T 2018
+El primer paso en la estimación del VAR es la detección de los valores atípicos en la series tratadas.  Para ello, aplicamos una función basada en el comando tso del paquete forecast. Este paquete a su vez, aplica el método de Cheng y Liu para detectar datos atípicos DECIR EN QUE CONSISTE EL METODO
+
+A continuación, pueden observarse los datos atípicos para las series de cada sector. En el sector del agro, se incluye un dato atípico en el primer trimestre de 2011, en la industria incluimos un dato del tercer trimestre de 2002, en el comercio incluimos 3 datos: uno en el segundo trimestre de 1997, otro en el cuarto trimestre de 2002 y otro en el segundo trimestre de 2003. Finalmente, en el sector servicios se incluyen las observaciones del primer trimestre de 1998, uno del tercer trimestre de 2002 y otro del segundo trimestre de 2003.
+
+Los signos de los valores atípicos se pueden observar en las gráficas.
+
+```{r, echo=TRUE, results="markup"}
+
+
+# Análisis de outliers. Usamos el método de Cheng y Liu
+agro0      <- tso1(serie18_diff1, "agro", cval1 = 2.5, cval2 = 3)
+industria0 <- tso1(serie18_diff1, "industria", cval1 = 3, cval2 = 3)
+comercio0  <- tso1(serie18_diff1, "comercio", cval1 = 3, cval2 = 3)
+servicios0 <- tso1(serie18_diff1, "servicios", cval1 = 3, cval2 = 3)
+
+agro0$outliers
+industria0$outliers
+comercio0$outliers
+servicios0$outliers
+tsoutliers::plot.tsoutliers(agro0)
+tsoutliers::plot.tsoutliers(industria0)
+tsoutliers::plot.tsoutliers(comercio0)
+tsoutliers::plot.tsoutliers(servicios0)
+
+```
+
+Generación de los regresores:
+```{r, results="hide", echo=TRUE}
+l             <- length(serie18_diff1[, "agro"])
+agro0_ao      <- tsoutliers::outliers.effects(agro0$outliers, l)
+industria0_ao <- tsoutliers::outliers.effects(industria0$outliers, l)
+comercio0_ao  <- tsoutliers::outliers.effects(comercio0$outliers, l) 
+servicios0_ao <- tsoutliers::outliers.effects(servicios0$outliers, l) 
+
+colnames(agro0_ao)      <- paste("agr", colnames(agro0_ao), sep = "")
+colnames(industria0_ao) <- paste("ind", colnames(industria0_ao), sep = "")
+colnames(comercio0_ao)  <- paste("com", colnames(comercio0_ao), sep = "")
+colnames(servicios0_ao) <- paste("com", colnames(servicios0_ao), sep = "")
+
+xreg0   <- cbind(agro0_ao, industria0_ao, comercio0_ao, servicios0_ao) 
+# Borramos repetidos y A0 en obs inicial: 2, 3, 8
+indices <- c(1,4:7)
+xreg0   <- xreg0[, indices]
+sum(apply(xreg0, 1, sum) > 1) 
+
+h = 2
+xreg0_pred <- matrix(0L, nrow = h, ncol = ncol(xreg0), dimnames = list(NULL, colnames(xreg0)))
+```
+Una vez conformada una matriz con las serues estacionarias y otra que nos indica los trimestres atípicos, pasamos a seleccionar el número de lags según el criterio de información de Akaike (AIC). La forma de operacionalizar esto es mediante el comando VARselect, que nos elije el numero de rezagos óptimo según AIC.
+
+```{r, results="markup", echo=TRUE}
+# lags, según distintos criterios
+p0 <- vars::VARselect(serie18_diff1, exogen = xreg0, type = "const")$selection["AIC(n)"]
+print(p0)
+```
+La cantidad óptima de lags, según AIC, es 1. En base a esto estimamos un VAR, con datos hasta el segundo trimestre de 2018, mediante el comando VAR del paquete vars. 
+
+Los resultados se observan a continuación:
+
+```{r, results="markup", echo=TRUE}
+var0 <- vars::VAR(serie18_diff1, p = p0, type = "const", exogen = xreg0)
+var0
+
+```
+
+Luego de estimar el VAR, aplicamos un test de estabilidad del mismo. Los resultados nos dicen que las raíces del mismo son mayores a 1 en su parte real. Por lo tanto las mismas caen fuera del circulo unitario y aseguramos que el proceso estocástico es estable.
+
+Por otra parte, los residuos no son normales según el test Jarque-Bera, ya que se rechaza la hipótesis nula de normalidad. 
+
+Tampoco se cumple la hipótesis de no correlación entre los residuos, dado que se rechaza el test de correlación serial de Portmanteau.
+
+Por último, no rechazamos la esfericidad de los errores, dado que el test ARCH-LM no rechaza tal hipótesis nula.
+
+```{r, results="markup", echo=TRUE}
+# Test
+vars::stability(var0)
+sum(vars::roots(var0) > 1) 
+vars::normality.test(var0)$jb.mul 
+vars::serial.test(var0, type = "PT.adjusted")$serial 
+vars::arch.test(var0)$arch.mul # No se rechaza la hipótesis nula de errores esféricos.
+
+```
+Luego de estimar el modelo y aplicar los correspondientes test, procedemos a realizar las predicciones para los últimos dos trimestres de 2018.  
+```{r, results="markup", echo=TRUE}
+# predicciones
+pred0 <- predict(object = var0, n.ahead = 2, ci = 0.95, dumvar = xreg0_pred)
+
+forecast::forecast(var0, dumvar = xreg0_pred, h =2) %>% autoplot() + xlab("Año") + 
+  autolayer(test, colour = FALSE, color = "red") # El rojo es la realidad.
+
+```
+#Estimación del VAR Para Todo el Período
+
+PONER ALGO DE INTERPRETACION DEL VAR
+
+```{r, results="markup" }
+var0$y # El orden es agro, industria, comercio, servicios.
+amat <- diag(4)
+diag(amat) <- NA
+amat[2, 1] <- NA
+amat[3, c(1,2)] <- NA
+amat[4, c(1:4)] <- NA
+
+svar0 <- SVAR(x = var0, estmethod = "direct", Amat = amat, Bmat = NULL,
+              hessian = TRUE, method="BFGS") 
+
+```
+
+
+#Funciones de Impulso Respuesta y Descomposición de Varianzas
+En base al anterior modelo VAR, planteamos una función para el calculo de las funciones de impulso respuesta. Esta se especifica en terminos acumulados y no acumulados, de modo que los coeficientes se puedan calcular de ambas formas.
+
+A continuación se aplica la función para los cuatro sectores de análisis y se grafican los resultados:
+
+```{r, results="markup"}
+irf1 <- function(svar, impulso, acumulado = FALSE){
+  return(
+    vars::irf(svar, n.ahead = 8, boot = TRUE, ci = 0.95, runs = 100, seed = 123, 
+              impulse = impulso, cumulative = acumulado)
+  )
+}
+irf_agro      <- irf1(svar0, "agro", FALSE)
+irf_industria <- irf1(svar0, "industria", FALSE)
+irf_comercio  <- irf1(svar0, "comercio", FALSE)
+irf_servicios <- irf1(svar0, "servicios", FALSE)
+
+irfc_agro      <- irf1(svar0, "agro", TRUE)
+irfc_industria <- irf1(svar0, "industria", TRUE)
+irfc_comercio  <- irf1(svar0, "comercio", TRUE)
+irfc_servicios <- irf1(svar0, "servicios", TRUE)
+
+plot(irf_agro,      main = "SVAR IRF desde agro",      sub = "95% Bootstrap CI, 100 corridas")
+plot(irf_industria, main = "SVAR IRF desde industria", sub = "95% Bootstrap CI, 100 corridas")
+plot(irf_comercio,  main = "SVAR IRF desde comercio",  sub = "95% Bootstrap CI, 100 corridas")
+plot(irf_servicios, main = "SVAR IRF desde servicios", sub = "95% Bootstrap CI, 100 corridas")
+
+plot(irfc_agro,      main = "SVAR IRFC desde agro",      sub = "95% Bootstrap CI, 100 corridas")
+plot(irfc_industria, main = "SVAR IRFC desde industria", sub = "95% Bootstrap CI, 100 corridas")
+plot(irfc_comercio,  main = "SVAR IRFC desde comercio",  sub = "95% Bootstrap CI, 100 corridas")
+plot(irfc_servicios, main = "SVAR IRFC desde servicios", sub = "95% Bootstrap CI, 100 corridas")
+
+```
+
+Como se observa en los gráficos, un shock en el sector agropecuario repercute significativamente solamente en el mismo sector. El shock tiene un efecto inmediato de 3.55% sobre el producto agrícola que se diluye al período siguiente, pues los intervalod de confianza al 95% contienen al cero. Por otro lado, el efecto acumulado, luego de 8 trimestres, sobre el mismo sector parece ser de 3.30% sobre el nivel inicial del producto.
+
+Para el caso de la industria, existe un efecto contemporaneo de 2.98% sobre el pib del sector y uno de 1.41% sobre el del sector comercio. Ambos shocks también desaparecen al siguiente período. En el acumulado, el efecto sobre la industria es de 3.2% y sobre el comercio de 0.09%. 
+
+En el sector comercio, un shock genera un aumento contemporaneo de 3.29% sobre el mismo y un aumento de 0.94% sobre el producto del agro al siguiente período. El acumulado ocho trimestres después es de 2,85% para el comercio y de 0.79% para el agro.
+
+Por último, en el sector servicios, los shocks solo inciden sobre el mismo sector. Sin embargo, se observa que estos son mucho más persistentes que en el resto de los casos, dado que generan un aumento contemporaneo del producto así como un aumento hasta en tres trimestres luego de ocurrido el shock. El efecto contemporáneo es de 3.15%, el efecto en el trimestre posterior es de 1.63%, luego de dos trimestres es de 0.87% y luego de tres trimestres de 0.04%. El efecto acumulado luego de ocho trimestres es de 8.43% sobre el nivel inicial del pib servicios.
+
+Luego de esto, hacemos la descomposición del error de predicción para 8 trimestres adelante mediante los siguientes comandos:
+
+```{r, results="markup"}
+# FEDV
+fevd <- vars::fevd(svar0, n.ahead = 8)
+#win.graph(width=8,height=10) # Para guardar la imagen y poner en el trabajo.
+print(fevd)
+
+```
+
+Como se observa, en la ventana temporal planteada, de 8 trimestres, el producto agrícola está explicado casin en un 90% por shocks del mismo sector, con un 6% explicado por shocks en el comercio, mientras el resto se reparte entre los sectores de la industria y servicios.
+
+Para el caso de la industria, un 96% de su varianza está explicada por los shocks de la misma. El resto de los sectores explican marginalmente los errores de predicción de la industria.
+
+El comercio, por otro lado, tiene que casi un 82% del error de predicción está explicado por shocks propios y un 15% por shocks de la industria. El resto se divide entre el agro y los servicios.
+
+Para los servicios, un 88% de la varianza en el error de predicción está explicada por shocks propios, un 7% por shocks de la industria, un 3% por shocks del agro y un 2% por shocks en el comercio.
+
+
+```{r, echo=FALSE, results="hide"}
+agro1      <- tso1(serie_diff1, "agro", cval1 = 2.5, cval2 = 3)
+industria1 <- tso1(serie_diff1, "industria", cval1 = 3, cval2 = 3)
+comercio1  <- tso1(serie_diff1, "comercio", cval1 = 3, cval2 = 3)
+servicios1 <- tso1(serie_diff1, "servicios", cval1 = 3, cval2 = 3)
+
+agro1$outliers
+industria1$outliers
+comercio1$outliers
+servicios1$outliers
+#tsoutliers::plot.tsoutliers(agro1)
+#tsoutliers::plot.tsoutliers(industria1)
+#tsoutliers::plot.tsoutliers(comercio1)
+#tsoutliers::plot.tsoutliers(servicios1)
+
+l1 <- length(serie_diff1[, "agro"])
+agro1_ao <- tsoutliers::outliers.effects(agro1$outliers, l1)
+industria1_ao <- tsoutliers::outliers.effects(industria1$outliers, l1)
+# comercio1_ao  <- tsoutliers::outliers.effects(comercio1$outliers, l1) 
+servicios1_ao  <- tsoutliers::outliers.effects(servicios1$outliers, l1) 
+
+colnames(agro1_ao) <- paste("agr", colnames(agro1_ao), sep = "")
+colnames(industria1_ao) <- paste("ind", colnames(industria1_ao), sep = "")
+# colnames(comercio1_ao) <- paste("com", colnames(comercio1_ao), sep = "")
+colnames(servicios1_ao) <- paste("com", colnames(servicios1_ao), sep = "")
+
+xreg1  <- cbind(agro1_ao, industria1_ao, servicios1_ao) 
+sum(apply(xreg1, 1, sum) > 1) 
+xreg1 # Borramos repetidos: 3, 6
+indices1 <- c(1:2,4:5)
+xreg1  <- xreg1[, indices1]
+
+
+```
+
+#Causalidad de Granger
+
+
+```{r, results='markup'}
+# Correr de nuevo el var por seguridad sin outliers.
+var2 <- vars::VAR(y = serie_diff1, ic = "AIC", type = "const", exogen = xreg1)
+var3 <- vars::VAR(y = serie_diff1, ic = "AIC", type = "const")
+# Pruebas de causalidad de dos formas:
+# Con bootstrap ó
+# Con matriz robusta a la heteroscedasticidad.
+
+vars::causality(x = var2, cause = "agro", boot = TRUE, boot.runs=1000)
+vars::causality(x = var3, cause = "agro", boot = TRUE, boot.runs=1000)
+vars::causality(x = var2, cause = "agro", vcov. = vcovHC(var2))
+vars::causality(x = var3, cause = "agro", vcov. = vcovHC(var3))
+# mismos resultados. El agro no causa a nadie. No se rechaza H0 en todos los casos.
+
+vars::causality(x = var2, cause = "industria", boot = TRUE, boot.runs=1000)
+vars::causality(x = var3, cause = "industria", boot = TRUE, boot.runs=1000)
+vars::causality(x = var2, cause = "industria", vcov. = vcovHC(var2))
+vars::causality(x = var3, cause = "industria", vcov. = vcovHC(var3))
+# Resultados diferentes entre las dos pruebas.
+# Mismos resultados al trabajar el modelo con outliers o sin
+# Industria según Granger no causa a nadie. Pero en instantánea se rechaza H0. Resultados contrapuestos
+# No se puede concluir nada.
+
+vars::causality(x = var2, cause = "comercio", boot = TRUE, boot.runs=1000)
+vars::causality(x = var3, cause = "comercio", boot = TRUE, boot.runs=1000)
+vars::causality(x = var2, cause = "comercio", vcov. = vcovHC(var2))
+vars::causality(x = var3, cause = "comercio", vcov. = vcovHC(var3))
+# Misma situación al caso previo.
+
+vars::causality(x = var2, cause = "servicios", boot = TRUE, boot.runs=1000)
+vars::causality(x = var3, cause = "servicios", boot = TRUE, boot.runs=1000)
+vars::causality(x = var2, cause = "servicios", vcov. = vcovHC(var2))
+vars::causality(x = var3, cause = "servicios", vcov. = vcovHC(var3))
+# Si se usa el modelo con outliers NO se rechaza H0 en ningún caso. O sea no hay causalidad a la granger
+# Si se usa el modelo sin outliers las pruebas dan resultados contrapuestos. No se puede concluir nada.
+# Por lo tanto, la conclusión del modelo a utilizar.
+```
+
